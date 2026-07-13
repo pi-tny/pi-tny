@@ -72,6 +72,7 @@ veja a documentação abaixo.
   banco de dados, referência de rotas da API, testes, containerização e deploy.
 - **[Guia de instalação](instalacao.md)** — passo a passo de pré-requisitos, instalação e
   variáveis de ambiente.
+- **[Design no Figma](https://www.figma.com/design/JV3aZKjoB5WZ6nLo2tatJR/PROJETO-TNY---MARCO-02?node-id=0-1&t=FXbnAJC6b4N1AEd7-1)** — protótipos e identidade visual do projeto.
 
 ## Stack
 
