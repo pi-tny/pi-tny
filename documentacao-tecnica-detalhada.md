@@ -327,12 +327,16 @@ Esta seção lista as decisões tecnológicas e as motivações para cada escolh
 
 | Tecnologia | Versão | Papel | Justificativa |
 |---|---|---|---|
-| Node.js | ≥ 22 | Runtime para build | Consistência entre backend e frontend. |
+| Node.js | ≥ 20 | Runtime para build | Vite 8 exige Node 20.19+/22.12+; a imagem Docker usa `node:20-alpine`. |
 | TypeScript | ~6.0.2 | Tipagem estática | Segurança de tipos no cliente. |
 | React | ^19.2.7 | Biblioteca de UI | Ecossistema maduro e produtividade. |
 | React Router DOM | ^7.18.1 | Roteamento | Padrão para SPAs React. |
 | Vite | ^8.1.1 | Build/dev | Inicialização rápida e HMR. |
 | Tailwind CSS | ^4.3.2 | Estilização | Estilização utilitária para acelerar builds de UI. |
+| TanStack Query | ^5.101.2 | Data fetching/cache | Cache, revalidação e estados de carregamento das chamadas à API. |
+| Axios | ^1.18.1 | Cliente HTTP | Consumo da API REST do backend (interceptors, base URL). |
+| Zod | ^4.4.3 | Validação | Validação de formulários e parsing de respostas no cliente. |
+| React Helmet Async | ^3.0.0 | SEO / `<head>` | Gerência de título e metatags por página. |
 | Lucide React | ^1.22.0 | Ícones SVG | Conjunto leve e consistente. |
 
 Decisão de UI: React + Tailwind prioriza rapidez de desenvolvimento, facilidade de manutenção e baixo acoplamento a design systems proprietários.
@@ -401,11 +405,17 @@ Por que aplicar migrations localmente?
 ```bash
 cd tny-frontend
 
-# Instalar dependências
+# 1. Copiar arquivo de variáveis de ambiente
+cp .env.example .env
+
+# 2. Instalar dependências
 npm install
 ```
 
-O frontend atualmente não exige variáveis de ambiente obrigatórias. Se você for integrar APIs privadas, defina `VITE_API_URL` conforme necessário.
+O frontend consome a API do backend, cuja URL é definida por `VITE_API_URL` (padrão
+`http://localhost:3000`). Essa variável é lida em **tempo de build** — o Vite embute o
+valor no bundle; em dev basta o `.env`, e para Docker/produção ela precisa ser passada no
+`docker build` (ver seção 12.2).
 
 ### 5.4 Variáveis de Ambiente do Backend
 
@@ -650,31 +660,50 @@ tny-backend/
 ### 7.3 `tny-frontend/`
 
 Organizado para ser uma SPA leve e extensível:
-- `src/context`: providers e hooks para estado global (carrinho, toasts).
-- `src/components` e `src/pages`: componentes reutilizáveis e views.
+- `src/services`: cliente Axios e chamadas à API REST do backend.
+- `src/lib`: cliente do TanStack Query (React Query) e utilitários compartilhados.
+- `src/context`: providers de estado global e seus hooks de consumo (`useCarrinho`, `useToast`, `useAuth`).
+- `src/hooks`: hooks de dados do React Query (`queries`, `mutations`) e utilitários (`useDebounce`, `useLocalStorage`).
+- `src/components` e `src/pages`: componentes reutilizáveis e views (com `pages/admin/`).
 - `Vite + Tailwind`: escolha que prioriza velocidade de desenvolvimento e tamanho reduzido do bundle.
 
-Design decision: o frontend assume que o backend provê endpoints REST bem documentados; a troca para outro cliente ou mobile app é direta quando a API tem contratos estáveis.
+Design decision: o frontend consome os endpoints REST do backend via Axios + TanStack
+Query (cache e revalidação); a troca para outro cliente ou mobile app é direta quando a
+API tem contratos estáveis.
 
 ```
 tny-frontend/
 │
 ├── src/
 │   ├── main.tsx                  ← Entry point React: monta #root com StrictMode
-│   ├── App.tsx                   ← Root: BrowserRouter + ToastProvider + CarrinhoProvider
+│   ├── App.tsx                   ← Root: Router + Query/Toast/Carrinho/Auth providers
 │   ├── index.css                 ← @import "tailwindcss"
 │   │
 │   ├── types/
-│   │   └── index.ts              ← Interfaces: Produto e CartItem
+│   │   └── index.ts              ← Tipos compartilhados (Produto, Variante, Pedido, etc.)
 │   │
-│   ├── data/
-│   │   └── produtos.ts           ← Array estático de produtos da vitrine
+│   ├── services/
+│   │   └── api.ts                ← Cliente Axios (base URL VITE_API_URL) + chamadas à API
+│   │
+│   ├── lib/
+│   │   ├── queryClient.ts        ← Instância do TanStack Query (React Query)
+│   │   ├── orders.ts             ← Helpers de pedido (montagem/formatização)
+│   │   ├── productFilters.ts     ← Filtros de produto da vitrine
+│   │   └── validation.ts         ← Schemas Zod de validação
 │   │
 │   ├── context/
 │   │   ├── CarrinhoContext.tsx   ← Estado global do carrinho + persistência localStorage
 │   │   ├── ToastContext.tsx      ← Notificações toast com auto-dismiss
+│   │   ├── AuthContext.tsx       ← Estado de autenticação admin (token JWT)
 │   │   ├── useCarrinho.ts        ← Hook: useCarrinho()
-│   │   └── useToast.ts           ← Hook: useToast()
+│   │   ├── useToast.ts           ← Hook: useToast()
+│   │   └── useAuth.ts            ← Hook: useAuth()
+│   │
+│   ├── hooks/
+│   │   ├── queries.ts            ← Hooks de leitura (React Query) sobre a API
+│   │   ├── mutations.ts          ← Hooks de escrita (React Query) sobre a API
+│   │   ├── useDebounce.ts        ← Debounce (busca/filtros)
+│   │   └── useLocalStorage.ts    ← Persistência tipada em localStorage
 │   │
 │   ├── routes/
 │   │   └── AppRoutes.tsx         ← Definição de todas as rotas da SPA
@@ -683,22 +712,36 @@ tny-frontend/
 │   │   ├── Header.tsx            ← Navegação principal + ícone do carrinho
 │   │   ├── Footer.tsx            ← Rodapé com contatos e newsletter
 │   │   ├── CardProduto.tsx       ← Card de produto reutilizável
+│   │   ├── ProdutosLista.tsx     ← Grade de produtos
+│   │   ├── Promocoes.tsx         ← Seção de promoções
+│   │   ├── NewsLetterForm.tsx    ← Formulário de inscrição (lead)
 │   │   ├── Toast.tsx             ← Overlay de notificação
-│   │   ├── NewsLetterForm.tsx    ← Formulário de inscrição
-│   │   └── Promocoes.tsx         ← Componente/página de promoções
+│   │   ├── SkeletonCard.tsx      ← Placeholder de carregamento
+│   │   ├── ErrorBoundary.tsx     ← Captura de erros de render
+│   │   ├── ProtectedRoute.tsx    ← Guard de rotas admin (exige JWT)
+│   │   └── ui/                   ← Primitivos de UI reutilizáveis
 │   │
 │   ├── pages/
 │   │   ├── Home.tsx              ← Vitrine principal com filtros de categoria
+│   │   ├── Produtos.tsx          ← Listagem completa de produtos
 │   │   ├── Produto.tsx           ← Detalhe do produto: galeria + seleção de variante
 │   │   ├── Carrinho.tsx          ← Carrinho com controles de quantidade
 │   │   ├── Checkout.tsx          ← Resumo do pedido + botão WhatsApp
+│   │   ├── PedidoConfirmado.tsx  ← Confirmação pós-checkout
 │   │   ├── Institucional.tsx     ← Página "Quem Somos"
 │   │   ├── Revendedor.tsx        ← Formulário de contato para revendedores
+│   │   ├── Faq.tsx               ← Perguntas frequentes
+│   │   ├── NotFound.tsx          ← Página 404
 │   │   └── admin/
 │   │       ├── Login.tsx         ← Login do painel admin
 │   │       ├── Dashboard.tsx     ← Painel com métricas básicas
-│   │       ├── CadastroProduto.tsx ← Formulário de cadastro de produto
-│   │       └── GerenciarEstoque.tsx ← Tabela de produtos com exclusão
+│   │       ├── CadastroProduto.tsx ← Cadastro/edição de produto
+│   │       ├── GerenciarEstoque.tsx ← Tabela de produtos e estoque
+│   │       ├── Categorias.tsx    ← Gestão de categorias
+│   │       ├── Pedidos.tsx       ← Listagem de pedidos
+│   │       ├── PedidoDetalhe.tsx ← Detalhe do pedido + status
+│   │       ├── Leads.tsx         ← Gestão de leads
+│   │       └── Admins.tsx        ← Gestão de administradores
 │   │
 │   └── assets/                   ← Imagens e logos da marca
 │
@@ -706,10 +749,12 @@ tny-frontend/
 │   ├── favicon.svg
 │   └── icons.svg
 │
+├── Dockerfile                    ← Build multi-stage (node:20-alpine → nginx:alpine)
+├── nginx.conf                    ← Config Nginx com SPA fallback (try_files)
+├── vercel.json                   ← Rewrites SPA para deploy na Vercel
+├── .env.example                  ← VITE_API_URL
 ├── index.html                    ← Shell HTML da SPA
 ├── vite.config.ts
-├── tailwind.config.js
-├── postcss.config.js
 ├── tsconfig.json
 └── package.json
 ```
@@ -981,13 +1026,31 @@ Vantagens do fluxo Docker:
 
 ### 12.2 Containerização do Frontend
 
-Plano: build multi-stage com `node` (builder) e `nginx` (runner) para imagem final enxuta.
+O frontend possui um `Dockerfile` multi-stage: `node:20-alpine` (builder, roda
+`npm run build`) e `nginx:alpine` (runner, serve o output estático do Vite). O
+`nginx.conf` habilita o **SPA fallback** (`try_files $uri /index.html`), garantindo que
+rotas do React Router (ex.: `/admin/dashboard`) funcionem em refresh direto.
 
-Justificativa: reduz tamanho da imagem e converte o output do Vite em arquivo estático servido por Nginx, prática comum para SPAs.
+Como `VITE_API_URL` é embutida em **tempo de build**, a URL da API é passada por
+`--build-arg`:
+
+```bash
+docker build --build-arg VITE_API_URL=https://api.exemplo.com -t tny-frontend .
+docker run -p 80:80 tny-frontend      # http://localhost
+```
+
+Sem `--build-arg`, a imagem usa o padrão `http://localhost:3000`. Trocar o backend exige
+rebuild da imagem.
+
+Justificativa: reduz o tamanho da imagem final e converte o output do Vite em arquivos
+estáticos servidos por Nginx — prática comum para SPAs.
 
 ### 12.3 Arquitetura alvo no `docker-compose`
 
-Objetivo final: 3 serviços na mesma rede (`db`, `api`, `frontend`), com variáveis de ambiente seguras e volumes para persistência de dados.
+Objetivo futuro: orquestrar os 3 serviços na mesma rede (`db`, `api`, `frontend`) via um
+`docker-compose` único, com variáveis de ambiente seguras e volumes para persistência de
+dados. Hoje o `docker-compose.yml` do backend já sobe `db` (Postgres) + `api`; a imagem do
+frontend é construída e executada separadamente (ver 12.2).
 
 ### 12.4 Deploy Serverless — Vercel (Backend)
 

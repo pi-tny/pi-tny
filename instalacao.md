@@ -50,11 +50,16 @@ npm run db:seed
 ```bash
 cd tny-frontend
 
-# Instalar dependências
+# 1. Copiar arquivo de variáveis de ambiente
+cp .env.example .env
+
+# 2. Instalar dependências
 npm install
 ```
 
-> O frontend não possui variáveis de ambiente obrigatórias no estado atual.
+> O frontend usa `VITE_API_URL` (padrão `http://localhost:3000`) para localizar a API do
+> backend. Ela é lida em **tempo de build** pelo Vite — em dev basta o `.env`; para
+> Docker/produção, passe-a no `docker build` (`--build-arg VITE_API_URL=...`).
 
 ### 2.4 Variáveis de Ambiente do Backend
 
